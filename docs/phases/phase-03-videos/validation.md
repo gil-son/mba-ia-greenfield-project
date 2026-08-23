@@ -4,9 +4,8 @@ name: phase-03-videos
 status: clean
 issue_count: 0
 sources_mtime:
-  docs/phases/phase-03-videos/context.md: "2026-08-19T20:03:31-03:00"
+  docs/phases/phase-03-videos/context.md: "2026-08-19T20:26:50-03:00"
   docs/decisions/technical-decisions-phase-03-videos.md: "2026-08-19T20:18:39-03:00"
-  docs/phases/phase-03-videos/library-refs.md: "2026-08-19T20:25:50-03:00"
 issues: []
 ---
 
