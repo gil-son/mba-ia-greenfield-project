@@ -104,7 +104,7 @@ Implementar, em `nestjs-project/`, o backend de upload e processamento de vídeo
 **Description:** Endpoint que pré-cadastra o vídeo como rascunho e inicia o multipart upload, devolvendo as URLs presigned das partes (per `phase-03-videos/TD-02`, `phase-03-videos/TD-07`).
 
 **Route:** POST /videos
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos.plan.md`
 **Authorization:** Authenticated (qualquer usuário autenticado cria vídeos sob o próprio canal)
 
 **Technical actions:**
@@ -135,7 +135,7 @@ Implementar, em `nestjs-project/`, o backend de upload e processamento de vídeo
 **Description:** Endpoint que finaliza o multipart upload e enfileira o job de processamento do vídeo (per `phase-03-videos/TD-02`, `phase-03-videos/TD-01`, `phase-03-videos/TD-07`).
 
 **Route:** POST /videos/:id/complete-upload
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos.plan.md`
 **Authorization:** Owner only
 
 **Technical actions:**
@@ -167,7 +167,7 @@ Implementar, em `nestjs-project/`, o backend de upload e processamento de vídeo
 **Description:** Endpoint que aborta um multipart upload em andamento e remove o rascunho (per `phase-03-videos/TD-02`, `phase-03-videos/TD-07`).
 
 **Route:** POST /videos/:id/abort-upload
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos.plan.md`
 **Authorization:** Owner only
 
 **Technical actions:**
@@ -197,7 +197,7 @@ Implementar, em `nestjs-project/`, o backend de upload e processamento de vídeo
 **Description:** Endpoint de consulta de status/metadata do vídeo, aplicando a Visibility rule (per `### API Contracts → GET /videos/:id`, `phase-03-videos/TD-06`).
 
 **Route:** GET /videos/:id
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos.plan.md`
 **Authorization:** Anonymous quando `status = ready`; Owner nos demais status (ver Visibility rule)
 
 **Technical actions:**
@@ -308,7 +308,7 @@ Implementar, em `nestjs-project/`, o backend de upload e processamento de vídeo
 **Description:** Endpoint de streaming via redirecionamento para presigned GET, respeitando a Visibility rule (per `phase-03-videos/TD-06`).
 
 **Route:** GET /videos/:id/stream
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos.plan.md`
 **Authorization:** Anonymous quando `status = ready`; Owner (com `409 VIDEO_NOT_READY`) nos demais status
 
 **Technical actions:**
@@ -337,7 +337,7 @@ Implementar, em `nestjs-project/`, o backend de upload e processamento de vídeo
 **Description:** Endpoint de download via redirecionamento para presigned GET com `Content-Disposition: attachment`, respeitando a Visibility rule (per `phase-03-videos/TD-06`).
 
 **Route:** GET /videos/:id/download
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos.plan.md`
 **Authorization:** Anonymous quando `status = ready`; Owner (com `409 VIDEO_NOT_READY`) nos demais status
 
 **Technical actions:**
