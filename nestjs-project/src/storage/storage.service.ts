@@ -8,6 +8,7 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import storageConfig from '../config/storage.config';
@@ -71,6 +72,30 @@ export class StorageService implements OnModuleInit {
       );
     }
     return { uploadId: UploadId, objectKey };
+  }
+
+  async getPresignedUploadPartUrls(
+    objectKey: string,
+    uploadId: string,
+    partCount: number,
+  ): Promise<{ partNumber: number; uploadUrl: string }[]> {
+    return Promise.all(
+      Array.from({ length: partCount }, (_, index) => index + 1).map(
+        async (partNumber) => ({
+          partNumber,
+          uploadUrl: await getSignedUrl(
+            this.s3,
+            new UploadPartCommand({
+              Bucket: this.videosBucket,
+              Key: objectKey,
+              UploadId: uploadId,
+              PartNumber: partNumber,
+            }),
+            { expiresIn: 3600 },
+          ),
+        }),
+      ),
+    );
   }
 
   async completeMultipartUpload(

@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/13 completed
+**SIs:** 4/13 completed
 
 ### SI-03.1 — Entidade Video e migration
 - **Status:** completed
@@ -27,9 +27,18 @@
   - `ioredis`/`bullmq` deixados intactos; instalados apenas `@aws-sdk/client-s3@^3.1113.0` e `@aws-sdk/s3-request-presigner@^3.1113.0` (versões da TD-03).
 
 ### SI-03.4 — Endpoint POST /videos (iniciar upload)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 8 passing (4 unit + 1 integration + 3 e2e)
+- **Observations:**
+  - **Bug pré-existente corrigido (confirmado com o usuário antes de agir):** `videos/videos.module.spec.ts` (da SI-03.3) estava falhando antes de eu tocar em qualquer código da SI-03.4 — o teste de compilação só carregava `queueConfig` no `ConfigModule.forRoot`, mas o `StorageModule` (importado pela `VideosModule` desde a SI-03.3) precisa de `storageConfig.KEY`. Corrigido adicionando `storageConfig` ao `load: [...]` do teste.
+  - Estendida `StorageService` com um novo método `getPresignedUploadPartUrls` (aditivo, não altera a assinatura de `createMultipartUpload`) para cumprir o contrato de resposta de `POST /videos` (`partSizeBytes` + `parts[]`) — não estava listado nas Technical actions da SI-03.4, mas é exigido pelo `### API Contracts` da própria SI e pelo Test Spec E2E (parts com presigned URL válida contra o MinIO).
+  - Adicionado `ChannelsService.findByUserId` (aditivo) para resolver o `channelId` do usuário autenticado — não existia método equivalente antes.
+  - `MULTIPART_PART_SIZE_BYTES` fixado em 100MB (`videos/videos.constants.ts`) — não há TD/spec explicitando o tamanho de parte; escolhido por ficar dentro dos limites do S3/MinIO (mín. 5MB, máx. 10.000 partes) para o teto de 10GB.
+  - `test/videos.e2e-spec.ts` (Grupo 1, cenário `derives-title-from-filename`): o passo 2 do spec original faz `GET /videos/:id` para verificar o `status`, mas essa rota é da SI-03.7 (fora do escopo desta rodada). Adaptado para ler o `status` diretamente do repositório `Video` no teste; mesma adaptação será necessária no cenário de abort da SI-03.6.
+  - **Achado fora de escopo, não corrigido:** `npm run lint` já falhava antes desta SI, com 145+ erros pré-existentes em arquivos já commitados das fases 01/02 (`test/auth.e2e-spec.ts`: 48 erros; `src/auth/auth.service.spec.ts` + `src/channels/channels.service.spec.ts`: 97 erros) — majoritariamente `@typescript-eslint/no-unsafe-*` sobre corpos de resposta `any` do supertest e sobre `jest.Mocked`. Não tentei corrigir esse débito pré-existente — está fora do escopo da Fase 03. Sinalizando para revisão no final da fase.
+  - **Retrofit de lint nos arquivos novos (a pedido do usuário):** inicialmente espelhei o padrão de `auth.e2e-spec.ts`/`auth.service.spec.ts` (incluindo os mesmos padrões que disparam `no-unsafe-member-access`/`unbound-method`), mas a pedido do usuário retrofitei `videos.service.spec.ts` e `test/videos.e2e-spec.ts` para não disparar esses erros — mocks como `const` tipados (em vez de `jest.Mocked<...>` acessado por propriedade) e interfaces locais para os corpos de resposta do supertest (`res.body as CreateVideoResponse`, etc.), em vez de castings via `any`. `npx eslint` confirma zero erros nos arquivos novos da Fase 03 (só resta o débito pré-existente citado acima). Válido como padrão a seguir nas SIs 03.5/03.6 em diante.
+  - Warning `pg` (`Calling client.query() when the client is already executing a query is deprecated...`) investigado a pedido do usuário: rastreado via `node --trace-deprecation` até a pilha `PostgresQueryRunner.loadTables → RdbmsSchemaBuilder.build → DataSource.synchronize → DataSource.initialize` — inteiramente interno ao TypeORM 0.3.28 (o próprio `loadTables()` roda múltiplas queries de metadata via `Promise.all` reaproveitando o mesmo client durante o `synchronize: true` de `createTestDataSource`). Confirmado sistêmico rodando `video.entity.integration-spec.ts` (não tocado nesta sessão) isoladamente — mesmo warning, mesma pilha. Não é uma chamada da aplicação sem `await`; não há correção a fazer.
+  - **Segundo bug pré-existente encontrado durante essa investigação e corrigido (confirmado com o usuário):** `channels/entities/channel.entity.integration-spec.ts` falhava sozinho (5/5 testes) porque seu `ALL_ENTITIES` não incluía `Video`, mas `Channel` ganhou `@OneToMany(() => Video, ...)` na SI-03.1 — TypeORM não resolve a relação inversa sem `Video` no mesmo DataSource. Mesma classe de gap do `videos.module.spec.ts` corrigido antes. Corrigido adicionando `Video` a `ALL_ENTITIES`; os 5 testes voltam a passar.
 
 ### SI-03.5 — Endpoint POST /videos/:id/complete-upload
 - **Status:** pending
