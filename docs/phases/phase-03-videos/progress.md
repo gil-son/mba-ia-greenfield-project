@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/13 completed
+**SIs:** 6/13 completed
 
 ### SI-03.1 — Entidade Video e migration
 - **Status:** completed
@@ -41,13 +41,22 @@
   - **Segundo bug pré-existente encontrado durante essa investigação e corrigido (confirmado com o usuário):** `channels/entities/channel.entity.integration-spec.ts` falhava sozinho (5/5 testes) porque seu `ALL_ENTITIES` não incluía `Video`, mas `Channel` ganhou `@OneToMany(() => Video, ...)` na SI-03.1 — TypeORM não resolve a relação inversa sem `Video` no mesmo DataSource. Mesma classe de gap do `videos.module.spec.ts` corrigido antes. Corrigido adicionando `Video` a `ALL_ENTITIES`; os 5 testes voltam a passar.
 
 ### SI-03.5 — Endpoint POST /videos/:id/complete-upload
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 17 passing (8 unit + 2 integration + 7 e2e)
+- **Observations:**
+  - `VideosService` ganhou `@InjectQueue('video-processing')` no construtor (necessário para publicar o job `video.process`) — como consequência, os testes unitário e de integração da SI-03.4 (`initiateUpload`) precisaram de um provider/módulo de fila adicionado ao respectivo `TestingModule` (mock `getQueueToken` no unit, `BullModule` real no integration), mesmo sem `initiateUpload` usar a fila. Ambos continuam passando.
+  - Job `video.process` publicado com `attempts: 3` e `backoff: { type: 'exponential', delay: 1000 }` (per `phase-03-videos/TD-07` e `library-refs.md`), embora as ACs da SI não exijam esses parâmetros explicitamente.
+  - Nome do job usado: `'video.process'` (mesmo nome do evento em `### Events/Messages`), em vez de um nome genérico como `'process-video'` do exemplo de `library-refs.md` — mantém rastreabilidade 1:1 entre o nome do job na fila e a seção de Events/Messages do plano.
+  - Testes novos (unit, integration, e2e) escritos já com os padrões de lint limpos combinados na SI-03.4 (mocks `const` tipados, interfaces locais para corpos de resposta do supertest, `Queue<VideoProcessJobData>` tipado para evitar `no-unsafe-member-access` em `job.data`). `npx eslint` confirma zero erros nos arquivos novos/alterados desta SI.
 
 ### SI-03.6 — Endpoint POST /videos/:id/abort-upload
-- **Status:** pending
-- **Tests:** no tests
+- **Status:** completed
+- **Tests:** 24 passing (11 unit + 3 integration + 10 e2e)
+- **Observations:**
+  - Reaproveitados `findOwnedVideoOrThrow`/`assertDraft` (privados, criados na SI-03.5) para `abortUpload` — mesma checagem de ownership/status, sem duplicação.
+  - `videoRepository.remove(video)` usado em vez de `delete({id})` — já temos a entidade carregada (para a checagem de ownership) e `remove` é a forma idiomática do TypeORM para isso; evita o problema de `delete({})` com critério vazio (não se aplica aqui, mas mantém o padrão idiomático).
+  - `test/videos.e2e-spec.ts` (Grupo 3, cenário `aborts-and-removes-draft`): mesma adaptação da SI-03.4 — o passo 2 do spec original faz `GET /videos/:id` esperando 404; como a SI-03.7 ainda não existe nesta rodada, a remoção é verificada direto no repositório `Video` via `findOneBy` retornando `null`.
+  - Todos os arquivos novos/alterados desta SI já seguem os padrões de lint limpos combinados (mocks `const` tipados, interfaces locais para supertest) — `npx eslint` e `npx tsc --noEmit` confirmam zero erros/warnings nos arquivos de vídeo.
 - **Observations:** none
 
 ### SI-03.7 — Endpoint GET /videos/:id

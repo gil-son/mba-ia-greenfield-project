@@ -1,10 +1,12 @@
-import { ConfigModule } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
+import { ConfigModule, ConfigType } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ChannelsModule } from '../channels/channels.module';
 import { ChannelsService } from '../channels/channels.service';
 import { Channel } from '../channels/entities/channel.entity';
+import queueConfig from '../config/queue.config';
 import storageConfig from '../config/storage.config';
 import { StorageModule } from '../storage/storage.module';
 import { StorageService } from '../storage/storage.service';
@@ -13,11 +15,36 @@ import {
   createTestDataSource,
 } from '../test/create-test-data-source';
 import { User } from '../users/entities/user.entity';
+import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { CreateVideoDto } from './dto/create-video.dto';
 import { Video, VideoStatus } from './entities/video.entity';
 import { VideosService } from './videos.service';
 
 const ALL_ENTITIES = [User, Channel, Video];
+
+function buildTestModule(): Promise<TestingModule> {
+  const ds = createTestDataSource(ALL_ENTITIES);
+  return Test.createTestingModule({
+    imports: [
+      ConfigModule.forRoot({
+        isGlobal: true,
+        load: [storageConfig, queueConfig],
+      }),
+      TypeOrmModule.forRoot(ds.options),
+      TypeOrmModule.forFeature([Video]),
+      BullModule.forRootAsync({
+        inject: [queueConfig.KEY],
+        useFactory: (queue: ConfigType<typeof queueConfig>) => ({
+          connection: { host: queue.host, port: queue.port },
+        }),
+      }),
+      BullModule.registerQueue({ name: 'video-processing' }),
+      StorageModule,
+      ChannelsModule,
+    ],
+    providers: [VideosService],
+  }).compile();
+}
 
 describe('VideosService — initiateUpload (integration)', () => {
   let module: TestingModule;
@@ -29,17 +56,7 @@ describe('VideosService — initiateUpload (integration)', () => {
   let videoRepository: Repository<Video>;
 
   beforeAll(async () => {
-    const ds = createTestDataSource(ALL_ENTITIES);
-    module = await Test.createTestingModule({
-      imports: [
-        ConfigModule.forRoot({ isGlobal: true, load: [storageConfig] }),
-        TypeOrmModule.forRoot(ds.options),
-        TypeOrmModule.forFeature([Video]),
-        StorageModule,
-        ChannelsModule,
-      ],
-      providers: [VideosService],
-    }).compile();
+    module = await buildTestModule();
 
     dataSource = module.get(DataSource);
     videosService = module.get(VideosService);
@@ -91,5 +108,141 @@ describe('VideosService — initiateUpload (integration)', () => {
       result.objectKey,
       result.uploadId,
     );
+  });
+});
+
+describe('VideosService — completeUpload (integration)', () => {
+  let module: TestingModule;
+  let dataSource: DataSource;
+  let videosService: VideosService;
+  let channelsService: ChannelsService;
+  let userRepository: Repository<User>;
+  let videoRepository: Repository<Video>;
+
+  beforeAll(async () => {
+    module = await buildTestModule();
+
+    dataSource = module.get(DataSource);
+    videosService = module.get(VideosService);
+    channelsService = module.get(ChannelsService);
+    userRepository = dataSource.getRepository(User);
+    videoRepository = dataSource.getRepository(Video);
+  });
+
+  afterAll(async () => {
+    await module.close();
+  });
+
+  beforeEach(async () => {
+    await cleanAllTables(dataSource);
+  });
+
+  let userCounter = 0;
+  async function createDraftVideo(): Promise<{
+    userId: string;
+    videoId: string;
+    completeDto: CompleteUploadDto;
+  }> {
+    userCounter += 1;
+    const user = await userRepository.save(
+      userRepository.create({
+        email: `complete_owner_${userCounter}@example.com`,
+        password: 'hashed',
+      }),
+    );
+    await channelsService.createChannel(user.id, user.email);
+
+    const initiated = await videosService.initiateUpload(user.id, {
+      originalFilename: 'trip.mp4',
+      fileSizeBytes: 1_000_000,
+      mimeType: 'video/mp4',
+    });
+
+    const uploadResponse = await fetch(initiated.parts[0].uploadUrl, {
+      method: 'PUT',
+      body: Buffer.from('integration-test-part-bytes'),
+    });
+    const eTag = uploadResponse.headers.get('etag') ?? '';
+
+    return {
+      userId: user.id,
+      videoId: initiated.id,
+      completeDto: { parts: [{ partNumber: 1, eTag }] },
+    };
+  }
+
+  it('transitions a draft Video to processing on the DB', async () => {
+    const { userId, videoId, completeDto } = await createDraftVideo();
+
+    const result = await videosService.completeUpload(
+      videoId,
+      userId,
+      completeDto,
+    );
+
+    expect(result.status).toBe(VideoStatus.PROCESSING);
+
+    const saved = await videoRepository.findOneBy({ id: videoId });
+    expect(saved?.status).toBe(VideoStatus.PROCESSING);
+    expect(saved?.upload_id).toBeNull();
+  });
+});
+
+describe('VideosService — abortUpload (integration)', () => {
+  let module: TestingModule;
+  let dataSource: DataSource;
+  let videosService: VideosService;
+  let channelsService: ChannelsService;
+  let userRepository: Repository<User>;
+  let videoRepository: Repository<Video>;
+
+  beforeAll(async () => {
+    module = await buildTestModule();
+
+    dataSource = module.get(DataSource);
+    videosService = module.get(VideosService);
+    channelsService = module.get(ChannelsService);
+    userRepository = dataSource.getRepository(User);
+    videoRepository = dataSource.getRepository(Video);
+  });
+
+  afterAll(async () => {
+    await module.close();
+  });
+
+  beforeEach(async () => {
+    await cleanAllTables(dataSource);
+  });
+
+  let userCounter = 0;
+  async function createDraftVideo(): Promise<{
+    userId: string;
+    videoId: string;
+  }> {
+    userCounter += 1;
+    const user = await userRepository.save(
+      userRepository.create({
+        email: `abort_owner_${userCounter}@example.com`,
+        password: 'hashed',
+      }),
+    );
+    await channelsService.createChannel(user.id, user.email);
+
+    const initiated = await videosService.initiateUpload(user.id, {
+      originalFilename: 'trip.mp4',
+      fileSizeBytes: 1_000_000,
+      mimeType: 'video/mp4',
+    });
+
+    return { userId: user.id, videoId: initiated.id };
+  }
+
+  it('removes a draft Video from the DB', async () => {
+    const { userId, videoId } = await createDraftVideo();
+
+    await videosService.abortUpload(videoId, userId);
+
+    const saved = await videoRepository.findOneBy({ id: videoId });
+    expect(saved).toBeNull();
   });
 });

@@ -1,15 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { extname, basename } from 'node:path';
 import { Injectable } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
 import { ChannelsService } from '../channels/channels.service';
 import { StorageService } from '../storage/storage.service';
+import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { CreateVideoDto } from './dto/create-video.dto';
-import { Video } from './entities/video.entity';
+import { Video, VideoStatus } from './entities/video.entity';
 import {
   FileTooLargeException,
   UnsupportedMediaTypeException,
+  UploadAlreadyCompletedException,
+  UploadCompletionFailedException,
+  VideoNotFoundException,
 } from './exceptions/video.exception';
 import {
   ACCEPTED_VIDEO_MIME_TYPES,
@@ -26,6 +32,11 @@ export interface InitiateUploadResult {
   parts: { partNumber: number; uploadUrl: string }[];
 }
 
+export interface CompleteUploadResult {
+  id: string;
+  status: VideoStatus;
+}
+
 @Injectable()
 export class VideosService {
   constructor(
@@ -33,6 +44,7 @@ export class VideosService {
     private readonly videoRepository: Repository<Video>,
     private readonly channelsService: ChannelsService,
     private readonly storageService: StorageService,
+    @InjectQueue('video-processing') private readonly queue: Queue,
   ) {}
 
   async initiateUpload(
@@ -96,5 +108,75 @@ export class VideosService {
       partSizeBytes: MULTIPART_PART_SIZE_BYTES,
       parts,
     };
+  }
+
+  async completeUpload(
+    videoId: string,
+    ownerId: string,
+    dto: CompleteUploadDto,
+  ): Promise<CompleteUploadResult> {
+    const video = await this.findOwnedVideoOrThrow(videoId, ownerId);
+    this.assertDraft(video);
+
+    if (!video.upload_id) {
+      throw new Error('Draft video is missing uploadId');
+    }
+
+    try {
+      await this.storageService.completeMultipartUpload(
+        video.object_key,
+        video.upload_id,
+        dto.parts,
+      );
+    } catch {
+      throw new UploadCompletionFailedException();
+    }
+
+    video.status = VideoStatus.PROCESSING;
+    video.upload_id = null;
+    const saved = await this.videoRepository.save(video);
+
+    await this.queue.add(
+      'video.process',
+      { videoId: saved.id, objectKey: saved.object_key },
+      { attempts: 3, backoff: { type: 'exponential', delay: 1000 } },
+    );
+
+    return { id: saved.id, status: saved.status };
+  }
+
+  async abortUpload(videoId: string, ownerId: string): Promise<void> {
+    const video = await this.findOwnedVideoOrThrow(videoId, ownerId);
+    this.assertDraft(video);
+
+    if (!video.upload_id) {
+      throw new Error('Draft video is missing uploadId');
+    }
+
+    await this.storageService.abortMultipartUpload(
+      video.object_key,
+      video.upload_id,
+    );
+    await this.videoRepository.remove(video);
+  }
+
+  private async findOwnedVideoOrThrow(
+    videoId: string,
+    ownerId: string,
+  ): Promise<Video> {
+    const video = await this.videoRepository.findOne({
+      where: { id: videoId },
+      relations: ['channel'],
+    });
+    if (!video || video.channel.user_id !== ownerId) {
+      throw new VideoNotFoundException();
+    }
+    return video;
+  }
+
+  private assertDraft(video: Video): void {
+    if (video.status !== VideoStatus.DRAFT) {
+      throw new UploadAlreadyCompletedException();
+    }
   }
 }

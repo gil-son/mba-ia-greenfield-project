@@ -15,3 +15,29 @@ export class UnsupportedMediaTypeException extends DomainException {
     );
   }
 }
+
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class UploadAlreadyCompletedException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_ALREADY_COMPLETED',
+      409,
+      'Video upload is no longer in draft status',
+    );
+  }
+}
+
+export class UploadCompletionFailedException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_COMPLETION_FAILED',
+      502,
+      'Object storage rejected the multipart upload completion',
+    );
+  }
+}
