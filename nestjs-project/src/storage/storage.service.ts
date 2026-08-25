@@ -1,3 +1,6 @@
+import { createReadStream, createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import type { Readable } from 'node:stream';
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import {
@@ -7,6 +10,7 @@ import {
   CreateMultipartUploadCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  PutObjectCommand,
   S3Client,
   UploadPartCommand,
 } from '@aws-sdk/client-s3';
@@ -127,6 +131,41 @@ export class StorageService implements OnModuleInit {
         Bucket: this.videosBucket,
         Key: objectKey,
         UploadId: uploadId,
+      }),
+    );
+  }
+
+  async downloadObject(
+    bucket: StorageBucket,
+    objectKey: string,
+    destinationPath: string,
+  ): Promise<void> {
+    const { Body } = await this.s3.send(
+      new GetObjectCommand({
+        Bucket: this.resolveBucket(bucket),
+        Key: objectKey,
+      }),
+    );
+    if (!Body) {
+      throw new Error(
+        `StorageService.downloadObject: object storage returned no Body for ${objectKey}`,
+      );
+    }
+    await pipeline(Body as Readable, createWriteStream(destinationPath));
+  }
+
+  async uploadObject(
+    bucket: StorageBucket,
+    objectKey: string,
+    filePath: string,
+    contentType: string,
+  ): Promise<void> {
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: this.resolveBucket(bucket),
+        Key: objectKey,
+        Body: createReadStream(filePath),
+        ContentType: contentType,
       }),
     );
   }

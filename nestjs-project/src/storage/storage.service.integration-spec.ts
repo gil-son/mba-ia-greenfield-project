@@ -1,7 +1,14 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import storageConfig from '../config/storage.config';
 import { StorageModule } from './storage.module';
 import { StorageService } from './storage.service';
@@ -113,5 +120,41 @@ describe('StorageService (integration)', () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe(body);
+  });
+
+  it('downloadObject writes the object bytes to the given destinationPath', async () => {
+    const key = `${randomId()}/${randomId()}/original.txt`;
+    const body = 'integration-test-download-bytes';
+    await rawS3.send(
+      new PutObjectCommand({ Bucket: VIDEOS_BUCKET, Key: key, Body: body }),
+    );
+    const tmpDir = await mkdtemp(join(tmpdir(), 'storage-service-'));
+    const destinationPath = join(tmpDir, 'downloaded.txt');
+
+    await storageService.downloadObject('videos', key, destinationPath);
+
+    expect(await readFile(destinationPath, 'utf-8')).toBe(body);
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('uploadObject puts the local file bytes into the thumbnails bucket', async () => {
+    const key = `${randomId()}/${randomId()}/thumbnail.jpg`;
+    const body = 'integration-test-upload-bytes';
+    const tmpDir = await mkdtemp(join(tmpdir(), 'storage-service-'));
+    const sourcePath = join(tmpDir, 'thumbnail.jpg');
+    await writeFile(sourcePath, body);
+
+    await storageService.uploadObject(
+      'thumbnails',
+      key,
+      sourcePath,
+      'image/jpeg',
+    );
+
+    const { Body } = await rawS3.send(
+      new GetObjectCommand({ Bucket: THUMBNAILS_BUCKET, Key: key }),
+    );
+    expect(await Body?.transformToString()).toBe(body);
+    await rm(tmpDir, { recursive: true, force: true });
   });
 });

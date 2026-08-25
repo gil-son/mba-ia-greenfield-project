@@ -598,9 +598,9 @@ SI-03.3 — Infra: cliente de object storage (root, independent)
 - [ ] SI-03.5 — Endpoint POST /videos/:id/complete-upload
 - [ ] SI-03.6 — Endpoint POST /videos/:id/abort-upload
 - [ ] SI-03.7 — Endpoint GET /videos/:id
-- [ ] SI-03.8 — Worker: entrypoint dedicado
-- [ ] SI-03.9 — Extração de metadata e thumbnail via FFmpeg
-- [ ] SI-03.10 — Worker: processor da fila video-processing
+- [x] SI-03.8 — Worker: entrypoint dedicado
+- [x] SI-03.9 — Extração de metadata e thumbnail via FFmpeg
+- [x] SI-03.10 — Worker: processor da fila video-processing
 - [ ] SI-03.11 — Endpoint GET /videos/:id/stream
 - [ ] SI-03.12 — Endpoint GET /videos/:id/download
 - [ ] SI-03.13 — Enriquecer spec OpenAPI dos endpoints de vídeo
