@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 9/13 completed
+**SIs:** 10/13 completed
 
 ### SI-03.1 — Entidade Video e migration
 - **Status:** completed
@@ -60,9 +60,14 @@
 - **Observations:** none
 
 ### SI-03.7 — Endpoint GET /videos/:id
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 60 passing (24 unit videos.service + 8 unit jwt-auth.guard + 14 integration + 14 e2e)
+- **Observations:**
+  - **Gap aditivo no `src/auth/` (não listado nas Technical actions, necessário para cumprir a Visibility rule):** o `Authorization` header do `GET /videos/:id` é opcional (per `### API Contracts`), mas o projeto só tinha dois modos — protegido (default) ou `@Public()` (sem qualquer `request.user`). Adicionado um terceiro modo `@OptionalAuth()` (`SetMetadata('isOptionalAuth', true)`, `src/auth/decorators/optional-auth.decorator.ts`) + branch em `JwtAuthGuard.canActivate`: quando a rota é `@OptionalAuth()`, header ausente ou JWT inválido não rejeita a requisição — apenas seta `request.user = null` e segue; um `@CurrentUserOrNull()` decorator novo expõe esse valor tipado como `JwtPayload | null` ao controller. Escolha de tratar "token presente mas inválido/expirado" como anônimo (em vez de 401) em vez de rejeitar — mantém a rota simples e simétrica ao caso "sem header"; nenhuma TD/spec cobre esse sub-caso explicitamente.
+  - `VideosController.findOne` injeta `StorageService` diretamente (não via `VideosService`) para montar `thumbnailUrl` — segue literalmente a Technical action 2 da própria SI, que atribui essa responsabilidade ao controller.
+  - `test/videos.e2e-spec.ts` (Grupo 1 `derives-title-from-filename` e Grupo 3 `aborts-and-removes-draft`): revertidas as adaptações temporárias das SIs 03.4/03.6 (que liam o `status`/removal diretamente do repositório porque `GET /videos/:id` ainda não existia) para usar o endpoint real, per pedido do usuário nesta rodada.
+  - **Matriz completa da Visibility rule (status × ownership) coberta nos níveis Unit + Integration**, não no E2E — per o próprio Tests table da SI ("Unit: branch logic — status × ownership matrix" / "Integration: DB contract — mesma matriz"). `videos.service.spec.ts`/`videos.service.integration-spec.ts` cobrem as 4×3 combinações (`draft`/`processing`/`failed`/`ready` × dono/não-dono-autenticado/anônimo) + vídeo inexistente. O E2E (`videos.e2e-spec.ts`, Grupo 4) segue o Test Spec (`videos.plan.md`) com os 4 cenários representativos do contrato HTTP (visível para todos quando `ready`, visível ao dono quando não-`ready`, mascarado para anônimo e para não-dono quando não-`ready`, `thumbnailUrl` só quando `ready`) — não duplica a matriz exaustiva, que já está garantida nas camadas de baixo.
+  - **Falso positivo transitório no E2E, sem correção necessária:** a primeira execução do `test:e2e` falhou nos 14 testes com "Exceeded timeout of 5000ms" no `beforeAll` (bootstrap do `AppModule`), imediatamente após o container `db` ter saído de um estado `unhealthy` (recovery de WAL). Re-executado com os containers estáveis — 14/14 passam em ~16s, bem dentro do timeout padrão do Jest. Nenhum arquivo alterado; achado registrado apenas para contexto caso reapareça.
 
 ### SI-03.8 — Worker: entrypoint dedicado
 - **Status:** completed

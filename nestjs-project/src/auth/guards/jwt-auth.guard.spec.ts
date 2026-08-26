@@ -2,6 +2,7 @@ import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
+import { IS_OPTIONAL_AUTH_KEY } from '../decorators/optional-auth.decorator';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 const TEST_SECRET = 'test-secret';
@@ -87,5 +88,42 @@ describe('JwtAuthGuard', () => {
       headers: { authorization: `Bearer ${expiredToken}` },
     });
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+  });
+
+  describe('@OptionalAuth() routes', () => {
+    beforeEach(() => {
+      mockReflector.getAllAndOverride.mockImplementation(
+        (key: string) => key === IS_OPTIONAL_AUTH_KEY,
+      );
+    });
+
+    it('passes with request.user = null when Authorization header is missing', async () => {
+      const request: Record<string, unknown> = { headers: {} };
+      const ctx = makeContext(request);
+
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
+      expect(request.user).toBeNull();
+    });
+
+    it('passes with request.user = null on an invalid JWT', async () => {
+      const request: Record<string, unknown> = {
+        headers: { authorization: 'Bearer not-a-valid-jwt' },
+      };
+      const ctx = makeContext(request);
+
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
+      expect(request.user).toBeNull();
+    });
+
+    it('passes and attaches payload to request.user with a valid JWT', async () => {
+      const token = jwtService.sign({ sub: 'user-1', email: 'a@example.com' });
+      const request: Record<string, unknown> = {
+        headers: { authorization: `Bearer ${token}` },
+      };
+      const ctx = makeContext(request);
+
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
+      expect((request.user as Record<string, unknown>)?.sub).toBe('user-1');
+    });
   });
 });

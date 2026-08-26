@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigType } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -244,5 +245,111 @@ describe('VideosService — abortUpload (integration)', () => {
 
     const saved = await videoRepository.findOneBy({ id: videoId });
     expect(saved).toBeNull();
+  });
+});
+
+describe('VideosService — findVisibleById (integration)', () => {
+  let module: TestingModule;
+  let dataSource: DataSource;
+  let videosService: VideosService;
+  let channelsService: ChannelsService;
+  let userRepository: Repository<User>;
+  let videoRepository: Repository<Video>;
+
+  beforeAll(async () => {
+    module = await buildTestModule();
+
+    dataSource = module.get(DataSource);
+    videosService = module.get(VideosService);
+    channelsService = module.get(ChannelsService);
+    userRepository = dataSource.getRepository(User);
+    videoRepository = dataSource.getRepository(Video);
+  });
+
+  afterAll(async () => {
+    await module.close();
+  });
+
+  beforeEach(async () => {
+    await cleanAllTables(dataSource);
+  });
+
+  let userCounter = 0;
+  async function createVideoWithStatus(
+    status: VideoStatus,
+  ): Promise<{ ownerId: string; videoId: string }> {
+    userCounter += 1;
+    const user = await userRepository.save(
+      userRepository.create({
+        email: `visible_owner_${userCounter}@example.com`,
+        password: 'hashed',
+      }),
+    );
+    const channel = await channelsService.createChannel(user.id, user.email);
+
+    const video = await videoRepository.save(
+      videoRepository.create({
+        channel_id: channel.id,
+        title: 'fixture',
+        original_filename: 'fixture.mp4',
+        object_key: `${channel.id}/${randomUUID()}/original.mp4`,
+        status,
+      }),
+    );
+
+    return { ownerId: user.id, videoId: video.id };
+  }
+
+  it('returns null when the video does not exist', async () => {
+    const result = await videosService.findVisibleById(randomUUID(), null);
+    expect(result).toBeNull();
+  });
+
+  describe.each([
+    VideoStatus.DRAFT,
+    VideoStatus.PROCESSING,
+    VideoStatus.FAILED,
+  ])('when status is %s', (status) => {
+    it('returns the video for its owner', async () => {
+      const { ownerId, videoId } = await createVideoWithStatus(status);
+
+      const result = await videosService.findVisibleById(videoId, ownerId);
+      expect(result?.id).toBe(videoId);
+    });
+
+    it('returns null for an authenticated non-owner', async () => {
+      const { videoId } = await createVideoWithStatus(status);
+
+      const result = await videosService.findVisibleById(
+        videoId,
+        'someone-else',
+      );
+      expect(result).toBeNull();
+    });
+
+    it('returns null for an anonymous requester', async () => {
+      const { videoId } = await createVideoWithStatus(status);
+
+      const result = await videosService.findVisibleById(videoId, null);
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('when status is ready', () => {
+    it('returns the video regardless of requester', async () => {
+      const { ownerId, videoId } = await createVideoWithStatus(
+        VideoStatus.READY,
+      );
+
+      await expect(
+        videosService.findVisibleById(videoId, ownerId),
+      ).resolves.toMatchObject({ id: videoId });
+      await expect(
+        videosService.findVisibleById(videoId, 'someone-else'),
+      ).resolves.toMatchObject({ id: videoId });
+      await expect(
+        videosService.findVisibleById(videoId, null),
+      ).resolves.toMatchObject({ id: videoId });
+    });
   });
 });

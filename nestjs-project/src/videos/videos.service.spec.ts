@@ -323,3 +323,115 @@ describe('VideosService — abortUpload', () => {
     ).rejects.toThrow(VideoNotFoundException);
   });
 });
+
+describe('VideosService — findVisibleById', () => {
+  let videosService: VideosService;
+
+  const findOneMock = jest.fn();
+
+  function buildVideo(status: VideoStatus): Video {
+    return {
+      id: 'video-1',
+      channel_id: 'channel-1',
+      title: 'trip',
+      original_filename: 'trip.mp4',
+      status,
+      object_key: 'channel-1/video-1/original.mp4',
+      upload_id: null,
+      thumbnail_key: null,
+      duration_seconds: null,
+      size_bytes: null,
+      mime_type: null,
+      failure_reason: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+      channel: { id: 'channel-1', user_id: 'owner-1' } as Channel,
+    } as Video;
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    const module = await Test.createTestingModule({
+      providers: [
+        VideosService,
+        {
+          provide: getRepositoryToken(Video),
+          useValue: { findOne: findOneMock },
+        },
+        { provide: ChannelsService, useValue: {} },
+        { provide: StorageService, useValue: {} },
+        {
+          provide: getQueueToken('video-processing'),
+          useValue: { add: jest.fn() },
+        },
+      ],
+    }).compile();
+
+    videosService = module.get(VideosService);
+  });
+
+  it('returns null when the video does not exist', async () => {
+    findOneMock.mockResolvedValue(null);
+
+    await expect(
+      videosService.findVisibleById('missing', 'owner-1'),
+    ).resolves.toBeNull();
+  });
+
+  describe.each([
+    VideoStatus.DRAFT,
+    VideoStatus.PROCESSING,
+    VideoStatus.FAILED,
+  ])('when status is %s', (status) => {
+    it('returns the video for its owner', async () => {
+      findOneMock.mockResolvedValue(buildVideo(status));
+
+      await expect(
+        videosService.findVisibleById('video-1', 'owner-1'),
+      ).resolves.toMatchObject({ id: 'video-1' });
+    });
+
+    it('returns null for an authenticated non-owner', async () => {
+      findOneMock.mockResolvedValue(buildVideo(status));
+
+      await expect(
+        videosService.findVisibleById('video-1', 'someone-else'),
+      ).resolves.toBeNull();
+    });
+
+    it('returns null for an anonymous requester', async () => {
+      findOneMock.mockResolvedValue(buildVideo(status));
+
+      await expect(
+        videosService.findVisibleById('video-1', null),
+      ).resolves.toBeNull();
+    });
+  });
+
+  describe('when status is ready', () => {
+    it('returns the video for its owner', async () => {
+      findOneMock.mockResolvedValue(buildVideo(VideoStatus.READY));
+
+      await expect(
+        videosService.findVisibleById('video-1', 'owner-1'),
+      ).resolves.toMatchObject({ id: 'video-1' });
+    });
+
+    it('returns the video for an authenticated non-owner', async () => {
+      findOneMock.mockResolvedValue(buildVideo(VideoStatus.READY));
+
+      await expect(
+        videosService.findVisibleById('video-1', 'someone-else'),
+      ).resolves.toMatchObject({ id: 'video-1' });
+    });
+
+    it('returns the video for an anonymous requester', async () => {
+      findOneMock.mockResolvedValue(buildVideo(VideoStatus.READY));
+
+      await expect(
+        videosService.findVisibleById('video-1', null),
+      ).resolves.toMatchObject({ id: 'video-1' });
+    });
+  });
+});

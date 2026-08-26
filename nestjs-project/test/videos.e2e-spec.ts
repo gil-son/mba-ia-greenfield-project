@@ -6,13 +6,15 @@ import { App } from 'supertest/types';
 import { DataSource, Repository } from 'typeorm';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { Queue } from 'bullmq';
+import { randomUUID } from 'node:crypto';
 import { AppModule } from '../src/app.module';
 import { AuthService } from '../src/auth/auth.service';
+import { ChannelsService } from '../src/channels/channels.service';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { MailService } from '../src/mail/mail.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
-import { Video } from '../src/videos/entities/video.entity';
+import { Video, VideoStatus } from '../src/videos/entities/video.entity';
 
 interface AuthTokens {
   access_token: string;
@@ -35,6 +37,15 @@ interface CreateVideoResponse {
 interface CompleteUploadResponse {
   id: string;
   status: string;
+}
+
+interface VideoDetailsResponse {
+  id: string;
+  title: string;
+  status: string;
+  durationSeconds: number | null;
+  thumbnailUrl: string | null;
+  createdAt: string;
 }
 
 interface AuthServiceInternal {
@@ -168,6 +179,41 @@ describe('Videos (e2e)', () => {
     return { access_token, videoId: body.id };
   }
 
+  function decodeJwtSub(token: string): string {
+    const payload = token.split('.')[1];
+    const decoded = JSON.parse(
+      Buffer.from(payload, 'base64').toString('utf8'),
+    ) as { sub: string };
+    return decoded.sub;
+  }
+
+  async function createVideoWithStatus(
+    email: string,
+    status: VideoStatus,
+    overrides: { thumbnailKey?: string | null } = {},
+  ): Promise<{ access_token: string; videoId: string }> {
+    const { access_token } = await registerConfirmAndLogin(email);
+    const userId = decodeJwtSub(access_token);
+    const channelsService = app.get(ChannelsService);
+    const channel = await channelsService.findByUserId(userId);
+    if (!channel) {
+      throw new Error('Channel not found for test fixture user');
+    }
+
+    const video = await videoRepository.save(
+      videoRepository.create({
+        channel_id: channel.id,
+        title: 'fixture',
+        original_filename: 'fixture.mp4',
+        object_key: `${channel.id}/${randomUUID()}/original.mp4`,
+        status,
+        thumbnail_key: overrides.thumbnailKey ?? null,
+      }),
+    );
+
+    return { access_token, videoId: video.id };
+  }
+
   describe('POST /videos', () => {
     it('derives-title-from-filename', async () => {
       const { access_token } = await registerConfirmAndLogin(
@@ -187,10 +233,11 @@ describe('Videos (e2e)', () => {
       const body = res.body as CreateVideoResponse;
       expect(body.title).toBe('trip');
 
-      // SI-03.7 (GET /videos/:id) is not yet implemented — the persisted
-      // status is asserted directly against the DB instead of via HTTP.
-      const saved = await videoRepository.findOneBy({ id: body.id });
-      expect(saved?.status).toBe('draft');
+      const getRes = await request(app.getHttpServer())
+        .get(`/videos/${body.id}`)
+        .set('Authorization', `Bearer ${access_token}`)
+        .expect(200);
+      expect((getRes.body as VideoDetailsResponse).status).toBe('draft');
     });
 
     it('rejects-file-size-over-10gb', async () => {
@@ -329,10 +376,11 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${access_token}`)
         .expect(204);
 
-      // SI-03.7 (GET /videos/:id) is not yet implemented — removal is
-      // asserted directly against the DB instead of via HTTP.
-      const saved = await videoRepository.findOneBy({ id: videoId });
-      expect(saved).toBeNull();
+      const res = await request(app.getHttpServer())
+        .get(`/videos/${videoId}`)
+        .set('Authorization', `Bearer ${access_token}`)
+        .expect(404);
+      expect((res.body as ErrorBody).error).toBe('VIDEO_NOT_FOUND');
     });
 
     it('rejects-non-draft-video', async () => {
@@ -364,6 +412,89 @@ describe('Videos (e2e)', () => {
         .expect(404);
 
       expect((res.body as ErrorBody).error).toBe('VIDEO_NOT_FOUND');
+    });
+  });
+
+  describe('GET /videos/:id', () => {
+    it('ready-video-visible-to-anyone', async () => {
+      const { videoId } = await createVideoWithStatus(
+        'get-owner-1@example.com',
+        VideoStatus.READY,
+        { thumbnailKey: 'ch/vid/thumbnail.jpg' },
+      );
+
+      const res = await request(app.getHttpServer())
+        .get(`/videos/${videoId}`)
+        .expect(200);
+
+      const body = res.body as VideoDetailsResponse;
+      expect(body).toMatchObject({
+        id: videoId,
+        title: 'fixture',
+        status: 'ready',
+      });
+      expect(body.thumbnailUrl).toBeTruthy();
+      expect(body.createdAt).toBeTruthy();
+    });
+
+    it('non-ready-video-visible-to-owner', async () => {
+      const { access_token, videoId } = await createVideoWithStatus(
+        'get-owner-2@example.com',
+        VideoStatus.DRAFT,
+      );
+
+      const res = await request(app.getHttpServer())
+        .get(`/videos/${videoId}`)
+        .set('Authorization', `Bearer ${access_token}`)
+        .expect(200);
+
+      expect((res.body as VideoDetailsResponse).status).toBe('draft');
+    });
+
+    it('non-ready-video-masked-for-others', async () => {
+      const { videoId } = await createVideoWithStatus(
+        'get-owner-3@example.com',
+        VideoStatus.DRAFT,
+      );
+      const { access_token: intruderToken } = await registerConfirmAndLogin(
+        'get-intruder-1@example.com',
+      );
+
+      const anonRes = await request(app.getHttpServer())
+        .get(`/videos/${videoId}`)
+        .expect(404);
+      expect((anonRes.body as ErrorBody).error).toBe('VIDEO_NOT_FOUND');
+
+      const authedRes = await request(app.getHttpServer())
+        .get(`/videos/${videoId}`)
+        .set('Authorization', `Bearer ${intruderToken}`)
+        .expect(404);
+      expect((authedRes.body as ErrorBody).error).toBe('VIDEO_NOT_FOUND');
+    });
+
+    it('thumbnail-url-only-when-ready', async () => {
+      const { access_token, videoId } = await createVideoWithStatus(
+        'get-owner-4@example.com',
+        VideoStatus.PROCESSING,
+      );
+
+      const processingRes = await request(app.getHttpServer())
+        .get(`/videos/${videoId}`)
+        .set('Authorization', `Bearer ${access_token}`)
+        .expect(200);
+      expect((processingRes.body as VideoDetailsResponse).thumbnailUrl).toBeNull();
+
+      await videoRepository.update(videoId, {
+        status: VideoStatus.READY,
+        thumbnail_key: 'ch/vid/thumbnail.jpg',
+      });
+
+      const readyRes = await request(app.getHttpServer())
+        .get(`/videos/${videoId}`)
+        .expect(200);
+      expect(
+        (readyRes.body as VideoDetailsResponse).thumbnailUrl,
+      ).toBeTruthy();
     });
   });
 });

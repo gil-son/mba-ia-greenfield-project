@@ -160,6 +160,20 @@ export class VideosService {
     await this.videoRepository.remove(video);
   }
 
+  async findVisibleById(
+    videoId: string,
+    requesterId: string | null,
+  ): Promise<Video | null> {
+    const video = await this.videoRepository.findOne({
+      where: { id: videoId },
+      relations: ['channel'],
+    });
+    if (!video) return null;
+    if (video.status === VideoStatus.READY) return video;
+    if (requesterId && video.channel.user_id === requesterId) return video;
+    return null;
+  }
+
   private async findOwnedVideoOrThrow(
     videoId: string,
     ownerId: string,
