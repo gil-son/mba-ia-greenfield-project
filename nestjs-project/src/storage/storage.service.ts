@@ -173,13 +173,14 @@ export class StorageService implements OnModuleInit {
   async getPresignedGetUrl(
     bucket: StorageBucket,
     objectKey: string,
-    options: { expiresIn?: number } = {},
+    options: { expiresIn?: number; responseContentDisposition?: string } = {},
   ): Promise<string> {
     return getSignedUrl(
       this.s3,
       new GetObjectCommand({
         Bucket: this.resolveBucket(bucket),
         Key: objectKey,
+        ResponseContentDisposition: options.responseContentDisposition,
       }),
       { expiresIn: options.expiresIn ?? 3600 },
     );

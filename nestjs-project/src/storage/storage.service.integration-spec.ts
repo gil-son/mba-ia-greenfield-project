@@ -122,6 +122,23 @@ describe('StorageService (integration)', () => {
     expect(await response.text()).toBe(body);
   });
 
+  it('getPresignedGetUrl applies responseContentDisposition to force a download', async () => {
+    const key = `${randomId()}/${randomId()}/original.txt`;
+    const body = 'integration-test-download-bytes';
+    await rawS3.send(
+      new PutObjectCommand({ Bucket: VIDEOS_BUCKET, Key: key, Body: body }),
+    );
+
+    const url = await storageService.getPresignedGetUrl('videos', key, {
+      responseContentDisposition: 'attachment',
+    });
+    const response = await fetch(url);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-disposition')).toBe('attachment');
+    expect(await response.text()).toBe(body);
+  });
+
   it('downloadObject writes the object bytes to the given destinationPath', async () => {
     const key = `${randomId()}/${randomId()}/original.txt`;
     const body = 'integration-test-download-bytes';

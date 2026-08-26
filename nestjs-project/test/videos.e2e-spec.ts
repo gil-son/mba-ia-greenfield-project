@@ -7,12 +7,16 @@ import { DataSource, Repository } from 'typeorm';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AppModule } from '../src/app.module';
 import { AuthService } from '../src/auth/auth.service';
 import { ChannelsService } from '../src/channels/channels.service';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { MailService } from '../src/mail/mail.service';
+import { StorageService } from '../src/storage/storage.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import { Video, VideoStatus } from '../src/videos/entities/video.entity';
 
@@ -212,6 +216,32 @@ describe('Videos (e2e)', () => {
     );
 
     return { access_token, videoId: video.id };
+  }
+
+  async function createReadyVideoWithRealObject(
+    email: string,
+  ): Promise<{ access_token: string; videoId: string }> {
+    const { access_token, videoId } = await createVideoWithStatus(
+      email,
+      VideoStatus.READY,
+      { thumbnailKey: 'ch/vid/thumbnail.jpg' },
+    );
+    const video = await videoRepository.findOneBy({ id: videoId });
+    if (!video) {
+      throw new Error('Fixture video not found after creation');
+    }
+
+    const tmpFile = join(tmpdir(), `e2e-video-${randomUUID()}.mp4`);
+    writeFileSync(tmpFile, 'fake-video-bytes');
+    try {
+      await app
+        .get(StorageService)
+        .uploadObject('videos', video.object_key, tmpFile, 'video/mp4');
+    } finally {
+      unlinkSync(tmpFile);
+    }
+
+    return { access_token, videoId };
   }
 
   describe('POST /videos', () => {
@@ -495,6 +525,99 @@ describe('Videos (e2e)', () => {
       expect(
         (readyRes.body as VideoDetailsResponse).thumbnailUrl,
       ).toBeTruthy();
+    });
+  });
+
+  describe('GET /videos/:id/stream', () => {
+    it('ready-video-streams-for-anyone', async () => {
+      const { videoId } = await createReadyVideoWithRealObject(
+        'stream-owner-1@example.com',
+      );
+
+      const res = await request(app.getHttpServer())
+        .get(`/videos/${videoId}/stream`)
+        .expect(302);
+
+      const location = res.headers.location as string;
+      expect(location).toBeTruthy();
+
+      const fetched = await fetch(location);
+      expect(fetched.status).toBe(200);
+      expect(await fetched.text()).toBe('fake-video-bytes');
+    });
+
+    it('owner-non-ready-gets-not-ready', async () => {
+      const { access_token, videoId } = await createVideoWithStatus(
+        'stream-owner-2@example.com',
+        VideoStatus.PROCESSING,
+      );
+
+      const res = await request(app.getHttpServer())
+        .get(`/videos/${videoId}/stream`)
+        .set('Authorization', `Bearer ${access_token}`)
+        .expect(409);
+
+      expect((res.body as ErrorBody).error).toBe('VIDEO_NOT_READY');
+    });
+
+    it('non-owner-non-ready-masked', async () => {
+      const { videoId } = await createVideoWithStatus(
+        'stream-owner-3@example.com',
+        VideoStatus.PROCESSING,
+      );
+
+      const res = await request(app.getHttpServer())
+        .get(`/videos/${videoId}/stream`)
+        .expect(404);
+
+      expect((res.body as ErrorBody).error).toBe('VIDEO_NOT_FOUND');
+    });
+  });
+
+  describe('GET /videos/:id/download', () => {
+    it('ready-video-downloads-for-anyone', async () => {
+      const { videoId } = await createReadyVideoWithRealObject(
+        'download-owner-1@example.com',
+      );
+
+      const res = await request(app.getHttpServer())
+        .get(`/videos/${videoId}/download`)
+        .expect(302);
+
+      const location = res.headers.location as string;
+      expect(location).toContain('response-content-disposition=attachment');
+
+      const fetched = await fetch(location);
+      expect(fetched.status).toBe(200);
+      expect(fetched.headers.get('content-disposition')).toBe('attachment');
+      expect(await fetched.text()).toBe('fake-video-bytes');
+    });
+
+    it('owner-non-ready-gets-not-ready', async () => {
+      const { access_token, videoId } = await createVideoWithStatus(
+        'download-owner-2@example.com',
+        VideoStatus.PROCESSING,
+      );
+
+      const res = await request(app.getHttpServer())
+        .get(`/videos/${videoId}/download`)
+        .set('Authorization', `Bearer ${access_token}`)
+        .expect(409);
+
+      expect((res.body as ErrorBody).error).toBe('VIDEO_NOT_READY');
+    });
+
+    it('non-owner-non-ready-masked', async () => {
+      const { videoId } = await createVideoWithStatus(
+        'download-owner-3@example.com',
+        VideoStatus.PROCESSING,
+      );
+
+      const res = await request(app.getHttpServer())
+        .get(`/videos/${videoId}/download`)
+        .expect(404);
+
+      expect((res.body as ErrorBody).error).toBe('VIDEO_NOT_FOUND');
     });
   });
 });

@@ -16,6 +16,7 @@ import {
   UploadAlreadyCompletedException,
   UploadCompletionFailedException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from './exceptions/video.exception';
 import {
   ACCEPTED_VIDEO_MIME_TYPES,
@@ -172,6 +173,38 @@ export class VideosService {
     if (video.status === VideoStatus.READY) return video;
     if (requesterId && video.channel.user_id === requesterId) return video;
     return null;
+  }
+
+  async getStreamUrl(
+    videoId: string,
+    requesterId: string | null,
+  ): Promise<string> {
+    const video = await this.findReadyVisibleOrThrow(videoId, requesterId);
+    return this.storageService.getPresignedGetUrl('videos', video.object_key);
+  }
+
+  async getDownloadUrl(
+    videoId: string,
+    requesterId: string | null,
+  ): Promise<string> {
+    const video = await this.findReadyVisibleOrThrow(videoId, requesterId);
+    return this.storageService.getPresignedGetUrl('videos', video.object_key, {
+      responseContentDisposition: 'attachment',
+    });
+  }
+
+  private async findReadyVisibleOrThrow(
+    videoId: string,
+    requesterId: string | null,
+  ): Promise<Video> {
+    const video = await this.findVisibleById(videoId, requesterId);
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    if (video.status !== VideoStatus.READY) {
+      throw new VideoNotReadyException();
+    }
+    return video;
   }
 
   private async findOwnedVideoOrThrow(

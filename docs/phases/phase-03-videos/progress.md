@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 10/13 completed
+**SIs:** 12/13 completed
 
 ### SI-03.1 — Entidade Video e migration
 - **Status:** completed
@@ -107,14 +107,23 @@
   - Suíte completa (`npm test -- --runInBand`) confirmada verde — 32/32 suites, 178/178 testes — de forma estável em 3 execuções consecutivas.
 
 ### SI-03.11 — Endpoint GET /videos/:id/stream
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 46 passing (29 unit videos.service + 17 e2e)
+- **Observations:**
+  - Extraído `VideosService.findReadyVisibleOrThrow` (privado) — reaplica `findVisibleById` (SI-03.7) e sinaliza `VideoNotFoundException`/`VideoNotReadyException` conforme a Technical action 1 pede; feito como método compartilhado porque a Technical action 2 da SI-03.12 já anuncia explicitamente "reaplica a mesma lógica de visibilidade de `getStreamUrl`" — evita duplicar a lógica quando SI-03.12 chegar.
+  - Nova exceção `VideoNotReadyException` (`VIDEO_NOT_READY`, 409) adicionada a `video.exception.ts`, per `### Error Catalog`.
+  - `VideosController.stream` usa `@Redirect()` (sem args) + retorno `{ url }` para redirecionamento dinâmico com status 302 — padrão oficial do NestJS para redirect com URL calculada em runtime (confirmado via context7 antes de implementar), em vez de injetar `@Res()` manualmente.
+  - E2E (`test/videos.e2e-spec.ts`, Grupo 5) sobe bytes reais no MinIO local (`StorageService.uploadObject`) para o vídeo fixture `ready` e efetivamente faz o `fetch` da presigned URL do `Location`, confirmando round-trip real contra o object storage — mesmo rigor já usado no Grupo 1 (`initiates-real-multipart-upload`) para o upload.
 
 ### SI-03.12 — Endpoint GET /videos/:id/download
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 61 passing (34 unit videos.service + 7 integration storage.service + 20 e2e)
+- **Observations:**
+  - `StorageService.getPresignedGetUrl` estendido com `responseContentDisposition?: string` (Technical action 1, literal) — passado como `ResponseContentDisposition` do `GetObjectCommand`; quando `undefined` (chamadas existentes de SI-03.7/03.11), o SDK simplesmente omite o parâmetro do presigning, sem efeito nas URLs já em uso.
+  - `VideosService.getDownloadUrl` reaplica `findReadyVisibleOrThrow` (extraído na SI-03.11) — nenhuma lógica de visibilidade duplicada, per a própria Technical action 2 da SI ("reaplica a mesma lógica de visibilidade de `getStreamUrl`").
+  - `VideosController.download` segue o mesmo padrão `@Redirect()` + `{ url }` do `stream` (SI-03.11).
+  - E2E (`test/videos.e2e-spec.ts`, Grupo 6) reaproveita o helper `createReadyVideoWithRealObject` (SI-03.11) e confirma o round-trip real: fetch da presigned URL do `Location` retorna os bytes reais com header `Content-Disposition: attachment`.
+  - Integration test novo em `storage.service.integration-spec.ts` (não listado no Tests table da SI-03.12, que só lista o Unit de `getDownloadUrl` — mas é o mesmo padrão já usado para os outros métodos de `StorageService`, cobrindo a extensão real contra o MinIO local) confirma que a presigned URL com `responseContentDisposition: 'attachment'` retorna o header `Content-Disposition` correto no fetch real.
 
 ### SI-03.13 — Enriquecer spec OpenAPI dos endpoints de vídeo
 - **Status:** pending

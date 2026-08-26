@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Redirect,
 } from '@nestjs/common';
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -96,5 +97,30 @@ export class VideosController {
           : null,
       createdAt: video.created_at,
     };
+  }
+
+  @Get(':id/stream')
+  @OptionalAuth()
+  @Redirect()
+  async stream(
+    @CurrentUserOrNull() user: JwtPayload | null,
+    @Param('id') id: string,
+  ): Promise<{ url: string }> {
+    const url = await this.videosService.getStreamUrl(id, user?.sub ?? null);
+    return { url };
+  }
+
+  @Get(':id/download')
+  @OptionalAuth()
+  @Redirect()
+  async download(
+    @CurrentUserOrNull() user: JwtPayload | null,
+    @Param('id') id: string,
+  ): Promise<{ url: string }> {
+    const url = await this.videosService.getDownloadUrl(
+      id,
+      user?.sub ?? null,
+    );
+    return { url };
   }
 }
