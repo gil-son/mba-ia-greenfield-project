@@ -228,19 +228,19 @@ _Subprojects in scope:_
 **Options:**
 
 ### Option A: Plain enum column, no automatic retry
-- `status: draft | processing | ready | error` on the video entity. The API sets `draft` on upload initiation (TD-02) and `processing` once the multipart upload is confirmed complete and the job is enqueued; the worker sets `ready` on success or `error` (plus an `error_message` column) on any failure, with no automatic re-attempt — a failed video stays `error` until a human/future-phase action explicitly retries it.
+- `status: draft | processing | ready | failed` on the video entity. The API sets `draft` on upload initiation (TD-02) and `processing` once the multipart upload is confirmed complete and the job is enqueued; the worker sets `ready` on success or `failed` (plus a `failure_reason` column) on any failure, with no automatic re-attempt — a failed video stays `failed` until a human/future-phase action explicitly retries it.
 - **Pros:** Simplest possible model — four states, one-directional writes, easy to reason about and test.
 - **Cons:** Any transient failure (e.g., a momentary storage hiccup) permanently fails the video and needs an operator or a future re-upload; not resilient by itself.
 
-### Option B: Enum column + queue-native automatic retry/backoff before `error`
-- Same four states as Option A, but the worker's job is configured with BullMQ's built-in bounded retry count and exponential backoff (e.g., 3 attempts) — `status` only flips to `error` after all automatic attempts are exhausted, and to `ready` as soon as one attempt succeeds.
-- **Pros:** Absorbs exactly the class of transient failures Option A leaves to chance, using a capability BullMQ already provides for free (no extra code beyond job options) — the video only ever reaches the user-facing `error` state after genuine, repeated failure. Still only four `status` values — no added modeling complexity over Option A.
-- **Cons:** A persistently-failing job now retries a few times before surfacing `error`, adding a bounded delay to when a genuinely broken upload (e.g., corrupt file) is reported as failed — acceptable given the attempt count stays small.
+### Option B: Enum column + queue-native automatic retry/backoff before `failed`
+- Same four states as Option A, but the worker's job is configured with BullMQ's built-in bounded retry count and exponential backoff (e.g., 3 attempts) — `status` only flips to `failed` after all automatic attempts are exhausted, and to `ready` as soon as one attempt succeeds.
+- **Pros:** Absorbs exactly the class of transient failures Option A leaves to chance, using a capability BullMQ already provides for free (no extra code beyond job options) — the video only ever reaches the user-facing `failed` state after genuine, repeated failure. Still only four `status` values — no added modeling complexity over Option A.
+- **Cons:** A persistently-failing job now retries a few times before surfacing `failed`, adding a bounded delay to when a genuinely broken upload (e.g., corrupt file) is reported as failed — acceptable given the attempt count stays small.
 
 ### Option C: Explicit state-machine library with guarded transitions
 - Model transitions with a formal state machine (e.g., `xstate` or a hand-rolled transition table) that validates every write against an allowed-transitions matrix, rejecting e.g. `ready → draft`.
 - **Pros:** Strongest guarantee against illegal transitions being written by a future bug.
-- **Cons:** Four linear states (`draft → processing → {ready|error}`) is not enough transition complexity to justify a dedicated state-machine dependency or hand-rolled guard matrix — the two writers (API on upload-start/confirm, worker on completion) are few enough that a plain enum with disciplined write sites already prevents the realistic mistakes.
+- **Cons:** Four linear states (`draft → processing → {ready|failed}`) is not enough transition complexity to justify a dedicated state-machine dependency or hand-rolled guard matrix — the two writers (API on upload-start/confirm, worker on completion) are few enough that a plain enum with disciplined write sites already prevents the realistic mistakes.
 
 **Recommendation:** **Option B (enum column + BullMQ automatic retry/backoff)** — it costs nothing beyond configuring job options already available once TD-01 (BullMQ) is chosen, and it is the only option that distinguishes a truly-failed video from a merely-transient hiccup without adding the transition-matrix overhead Option C would require for a state space this small.
 
