@@ -512,7 +512,9 @@ describe('Videos (e2e)', () => {
         .get(`/videos/${videoId}`)
         .set('Authorization', `Bearer ${access_token}`)
         .expect(200);
-      expect((processingRes.body as VideoDetailsResponse).thumbnailUrl).toBeNull();
+      expect(
+        (processingRes.body as VideoDetailsResponse).thumbnailUrl,
+      ).toBeNull();
 
       await videoRepository.update(videoId, {
         status: VideoStatus.READY,
@@ -522,9 +524,7 @@ describe('Videos (e2e)', () => {
       const readyRes = await request(app.getHttpServer())
         .get(`/videos/${videoId}`)
         .expect(200);
-      expect(
-        (readyRes.body as VideoDetailsResponse).thumbnailUrl,
-      ).toBeTruthy();
+      expect((readyRes.body as VideoDetailsResponse).thumbnailUrl).toBeTruthy();
     });
   });
 
@@ -538,7 +538,7 @@ describe('Videos (e2e)', () => {
         .get(`/videos/${videoId}/stream`)
         .expect(302);
 
-      const location = res.headers.location as string;
+      const location = res.headers.location;
       expect(location).toBeTruthy();
 
       const fetched = await fetch(location);
@@ -584,7 +584,7 @@ describe('Videos (e2e)', () => {
         .get(`/videos/${videoId}/download`)
         .expect(302);
 
-      const location = res.headers.location as string;
+      const location = res.headers.location;
       expect(location).toContain('response-content-disposition=attachment');
 
       const fetched = await fetch(location);

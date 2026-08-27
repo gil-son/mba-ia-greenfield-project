@@ -128,4 +128,111 @@ describe('exportSpec (integration)', () => {
       }
     }
   });
+
+  describe('videos paths (phase-03-videos)', () => {
+    let paths: Record<string, Record<string, Record<string, unknown>>>;
+
+    beforeAll(() => {
+      paths = document.paths as Record<
+        string,
+        Record<string, Record<string, unknown>>
+      >;
+    });
+
+    function responseCodes(operation: Record<string, unknown>): string[] {
+      return Object.keys(operation.responses as Record<string, unknown>);
+    }
+
+    function hasErrorEnvelopeRef(
+      operation: Record<string, unknown>,
+      status: string,
+    ): boolean {
+      const responses = operation.responses as Record<
+        string,
+        Record<string, unknown>
+      >;
+      const response = responses[status];
+      const content = response?.content as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+      const schema = content?.['application/json']?.schema as
+        | Record<string, unknown>
+        | undefined;
+      return schema?.['$ref'] === '#/components/schemas/ApiErrorEnvelope';
+    }
+
+    const videoPaths = [
+      { path: '/videos', method: 'post' },
+      { path: '/videos/{id}/complete-upload', method: 'post' },
+      { path: '/videos/{id}/abort-upload', method: 'post' },
+      { path: '/videos/{id}', method: 'get' },
+      { path: '/videos/{id}/stream', method: 'get' },
+      { path: '/videos/{id}/download', method: 'get' },
+    ];
+
+    it('exports all 6 video paths', () => {
+      for (const { path, method } of videoPaths) {
+        expect(paths[path]?.[method]).toBeDefined();
+      }
+    });
+
+    it('every video operation has a non-empty summary and at least one success + one error response', () => {
+      const successCodes = new Set(['200', '201', '204', '302']);
+
+      for (const { path, method } of videoPaths) {
+        const operation = paths[path][method];
+        expect(typeof operation.summary).toBe('string');
+        expect((operation.summary as string).length).toBeGreaterThan(0);
+
+        const codes = responseCodes(operation);
+        expect(codes.some((c) => successCodes.has(c))).toBe(true);
+        expect(codes.some((c) => !successCodes.has(c))).toBe(true);
+      }
+    });
+
+    it('every video error response references ApiErrorEnvelope', () => {
+      const successCodes = new Set(['200', '201', '204', '302']);
+
+      for (const { path, method } of videoPaths) {
+        const operation = paths[path][method];
+        const errorCodes = responseCodes(operation).filter(
+          (c) => !successCodes.has(c),
+        );
+        expect(errorCodes.length).toBeGreaterThan(0);
+        for (const code of errorCodes) {
+          expect(hasErrorEnvelopeRef(operation, code)).toBe(true);
+        }
+      }
+    });
+
+    it('POST /videos, complete-upload and abort-upload require access-token security', () => {
+      const securedPaths = [
+        { path: '/videos', method: 'post' },
+        { path: '/videos/{id}/complete-upload', method: 'post' },
+        { path: '/videos/{id}/abort-upload', method: 'post' },
+      ];
+
+      for (const { path, method } of securedPaths) {
+        const operation = paths[path][method];
+        const security = operation.security as
+          | Array<Record<string, unknown>>
+          | undefined;
+        expect(security).toBeDefined();
+        expect(security?.some((req) => 'access-token' in req)).toBe(true);
+      }
+    });
+
+    it('GET /videos/:id, /stream and /download do not require security (Visibility rule)', () => {
+      const publicPaths = [
+        { path: '/videos/{id}', method: 'get' },
+        { path: '/videos/{id}/stream', method: 'get' },
+        { path: '/videos/{id}/download', method: 'get' },
+      ];
+
+      for (const { path, method } of publicPaths) {
+        const operation = paths[path][method];
+        expect(operation.security).toBeUndefined();
+      }
+    });
+  });
 });

@@ -493,9 +493,9 @@ describe('VideosService — getStreamUrl', () => {
   it('returns a presigned GET URL for a ready video, for any requester', async () => {
     findOneMock.mockResolvedValue(buildVideo(VideoStatus.READY));
 
-    await expect(
-      videosService.getStreamUrl('video-1', null),
-    ).resolves.toBe('https://minio.local/presigned-get');
+    await expect(videosService.getStreamUrl('video-1', null)).resolves.toBe(
+      'https://minio.local/presigned-get',
+    );
     expect(getPresignedGetUrlMock).toHaveBeenCalledWith(
       'videos',
       'channel-1/video-1/original.mp4',
@@ -523,18 +523,18 @@ describe('VideosService — getStreamUrl', () => {
   it('throws VIDEO_NOT_FOUND for an anonymous requester when the video is not ready', async () => {
     findOneMock.mockResolvedValue(buildVideo(VideoStatus.PROCESSING));
 
-    await expect(
-      videosService.getStreamUrl('video-1', null),
-    ).rejects.toThrow(VideoNotFoundException);
+    await expect(videosService.getStreamUrl('video-1', null)).rejects.toThrow(
+      VideoNotFoundException,
+    );
     expect(getPresignedGetUrlMock).not.toHaveBeenCalled();
   });
 
   it('throws VIDEO_NOT_FOUND when the video does not exist', async () => {
     findOneMock.mockResolvedValue(null);
 
-    await expect(
-      videosService.getStreamUrl('missing', null),
-    ).rejects.toThrow(VideoNotFoundException);
+    await expect(videosService.getStreamUrl('missing', null)).rejects.toThrow(
+      VideoNotFoundException,
+    );
   });
 });
 
@@ -543,7 +543,9 @@ describe('VideosService — getDownloadUrl', () => {
 
   const findOneMock = jest.fn();
   const getPresignedGetUrlMock = jest.fn(() =>
-    Promise.resolve('https://minio.local/presigned-get?response-content-disposition=attachment'),
+    Promise.resolve(
+      'https://minio.local/presigned-get?response-content-disposition=attachment',
+    ),
   );
 
   function buildVideo(status: VideoStatus): Video {
@@ -625,17 +627,17 @@ describe('VideosService — getDownloadUrl', () => {
   it('throws VIDEO_NOT_FOUND for an anonymous requester when the video is not ready', async () => {
     findOneMock.mockResolvedValue(buildVideo(VideoStatus.PROCESSING));
 
-    await expect(
-      videosService.getDownloadUrl('video-1', null),
-    ).rejects.toThrow(VideoNotFoundException);
+    await expect(videosService.getDownloadUrl('video-1', null)).rejects.toThrow(
+      VideoNotFoundException,
+    );
     expect(getPresignedGetUrlMock).not.toHaveBeenCalled();
   });
 
   it('throws VIDEO_NOT_FOUND when the video does not exist', async () => {
     findOneMock.mockResolvedValue(null);
 
-    await expect(
-      videosService.getDownloadUrl('missing', null),
-    ).rejects.toThrow(VideoNotFoundException);
+    await expect(videosService.getDownloadUrl('missing', null)).rejects.toThrow(
+      VideoNotFoundException,
+    );
   });
 });

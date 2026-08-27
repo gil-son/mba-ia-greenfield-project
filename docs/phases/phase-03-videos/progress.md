@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
-**SIs:** 12/13 completed
+**Status:** completed
+**SIs:** 13/13 completed
 
 ### SI-03.1 — Entidade Video e migration
 - **Status:** completed
@@ -126,6 +126,21 @@
   - Integration test novo em `storage.service.integration-spec.ts` (não listado no Tests table da SI-03.12, que só lista o Unit de `getDownloadUrl` — mas é o mesmo padrão já usado para os outros métodos de `StorageService`, cobrindo a extensão real contra o MinIO local) confirma que a presigned URL com `responseContentDisposition: 'attachment'` retorna o header `Content-Disposition` correto no fetch real.
 
 ### SI-03.13 — Enriquecer spec OpenAPI dos endpoints de vídeo
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 14 passing (extensão de openapi-export.integration-spec.ts)
+- **Observations:**
+  - `@ApiParam('id')` do enunciado é forma informal — a assinatura real de `@nestjs/swagger` (confirmada nos `.d.ts` instalados, `^11.4.2`) exige um objeto `ApiParamOptions`; implementado como `@ApiParam({ name: 'id', description: 'Video id', type: String, format: 'uuid' })`, extraído para uma constante `VIDEO_ID_PARAM` reaproveitada nos 5 endpoints com path param (evita repetir o literal 5x).
+  - `@ApiBody({ type: <Dto> })` aponta para `CreateVideoDto`/`CompleteUploadDto` sem exigir `@ApiProperty()` nos campos — o CLI plugin do Nest (`nest-cli.json` → `classValidatorShim: true`) já infere o schema a partir dos decorators do `class-validator`, mesmo padrão usado pelos DTOs de auth.
+  - `npm run openapi:export` re-executado; diff de `openapi.json` é 100% aditivo (423 linhas inseridas, 0 removidas) — os 6 paths novos, cada um com `summary` não vazio, respostas de sucesso (`201`/`200`/`204`/`302`) + erro (`$ref` para `ApiErrorEnvelope`), e `security: [{ "access-token": [] }]` presente apenas em `POST /videos`, `.../complete-upload`, `.../abort-upload` — ausente em `GET /videos/:id`, `/stream`, `/download` (per Visibility rule). Confirmado manualmente via inspeção do JSON exportado antes de rodar os testes.
+
+## Final Verification (Definition of Done)
+
+Todos os 13 SIs completos. Checagem final rodada após a SI-03.13:
+
+- `docker compose exec nestjs-api npm test -- --runInBand` — **221/221 passing, 32/32 suites** (projeto completo, não só Fase 03).
+- `docker compose exec nestjs-api npx tsc --noEmit` — **0 erros**.
+- `docker compose exec nestjs-api npm run lint` — **190 problemas (150 erros + 40 warnings), todos débito pré-existente das Fases 01/02** (145 nos 3 arquivos já sinalizados na SI-03.4 — `test/auth.e2e-spec.ts`, `src/auth/auth.service.spec.ts`, `src/channels/channels.service.spec.ts` — e mais 45 espalhados em outros 8 arquivos antigos: `auth.service.integration-spec.ts`, `channels.service.ts`, `domain-exception.filter.spec.ts`, `validation-exception.filter.spec.ts`, `env.validation.integration-spec.ts`, `mail.service.integration-spec.ts`, `create-test-data-source.ts`, `users.service.integration-spec.ts`). **Zero débito novo** em qualquer arquivo desta fase (`src/videos/`, `src/storage/`, decorators/guard de auth novos, specs novos/estendidos).
+- `docker compose exec nestjs-api npm run test:e2e` — **falhou na primeira tentativa** (21/72 falhas, cross-contamination entre `auth.e2e-spec.ts` e `videos.e2e-spec.ts` por violação de FK) — causa raiz: o script `test:e2e` do `package.json` não incluía `--runInBand`, então o Jest rodava os 4 arquivos e2e em workers paralelos contra o mesmo banco de teste compartilhado, apesar do `CLAUDE.md` do subproject documentar "always with --runInBand". **Não é um bug de código** — cada arquivo e2e já passava individualmente com `--runInBand` explícito ao longo de toda a fase.
+- **Correção aplicada (a pedido do usuário, fora do escopo de qualquer SI):** `package.json` → `"test:e2e": "jest --config ./test/jest-e2e.json --runInBand"` (antes: sem `--runInBand`). Reexecutado `npm run test:e2e` sem flag manual — **72/72 passing, 4/4 suites**, confirmando que o script corrigido agora bate com o que o `CLAUDE.md` sempre documentou.
+
+**Status final: Fase 03 completa — todos os checks da Definition of Done verdes.**

@@ -30,12 +30,10 @@ export class JwtAuthGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
-    const request = context
-      .switchToHttp()
-      .getRequest<{
-        headers: Record<string, string>;
-        user: JwtPayload | null;
-      }>();
+    const request = context.switchToHttp().getRequest<{
+      headers: Record<string, string>;
+      user: JwtPayload | null;
+    }>();
     const authHeader = request.headers?.authorization;
 
     if (!authHeader || !authHeader.startsWith(BEARER_PREFIX)) {
