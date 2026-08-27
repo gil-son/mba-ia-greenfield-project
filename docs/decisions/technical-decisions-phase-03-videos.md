@@ -46,6 +46,8 @@ _Subprojects in scope:_
 
 **Decision:** A (BullMQ + Redis via `@nestjs/bullmq`)
 
+**Libraries:** bullmq@^6.1.2, @nestjs/bullmq@^11.0.5
+
 ---
 
 ## TD-02: Video Upload Strategy for Files up to 10GB
@@ -76,6 +78,8 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (Presigned multipart upload direct to object storage)** — it is the only option where a 10GB upload has zero throughput cost on the API process, matching the capability's explicit "sem impacto na performance" wording, and multipart is the mechanism that actually makes objects of that size possible against an S3-compatible API in the first place.
 
 **Decision:** A (Presigned multipart upload direct to object storage)
+
+**Libraries:** —
 
 ---
 
@@ -110,6 +114,8 @@ _Subprojects in scope:_
 
 **Decision:** B (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`)
 
+**Libraries:** @aws-sdk/client-s3@^3.1113.x, @aws-sdk/s3-request-presigner@^3.1113.x
+
 ---
 
 ## TD-04: Video Worker Execution Model
@@ -140,6 +146,8 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (dedicated worker entrypoint in `nestjs-project/`, own Compose service)** — it is the only option that gives a genuinely separate container/process (as the phase requires) without introducing monorepo/workspace tooling the project has not adopted, while still sharing the domain code (entities, config, video services) that both the API and worker need — avoiding the duplication risk of Option B.
 
 **Decision:** A (Dedicated worker entrypoint in `nestjs-project/`, own Compose service)
+
+**Libraries:** —
 
 ---
 
@@ -172,6 +180,8 @@ _Subprojects in scope:_
 
 **Decision:** B (Direct `child_process` invocation of `ffmpeg`/`ffprobe`)
 
+**Libraries:** —
+
 ---
 
 ## TD-06: Video Streaming & Download Delivery Strategy
@@ -203,6 +213,8 @@ _Subprojects in scope:_
 
 **Decision:** B (Presigned GET URL, direct client-to-storage streaming)
 
+**Libraries:** —
+
 ---
 
 ## TD-07: Video Status Lifecycle & Failure Handling
@@ -233,6 +245,8 @@ _Subprojects in scope:_
 **Recommendation:** **Option B (enum column + BullMQ automatic retry/backoff)** — it costs nothing beyond configuring job options already available once TD-01 (BullMQ) is chosen, and it is the only option that distinguishes a truly-failed video from a merely-transient hiccup without adding the transition-matrix overhead Option C would require for a state space this small.
 
 **Decision:** B (Enum column + BullMQ automatic retry/backoff)
+
+**Libraries:** —
 
 ---
 

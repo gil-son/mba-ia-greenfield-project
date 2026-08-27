@@ -438,6 +438,421 @@
           "auth"
         ]
       }
+    },
+    "/videos": {
+      "post": {
+        "description": "Pre-registers a video as a draft owned by the authenticated user and initiates an S3 multipart upload, returning presigned URLs for each part.",
+        "operationId": "VideosController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVideoDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Upload initiated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "uploadId": {
+                      "type": "string"
+                    },
+                    "objectKey": {
+                      "type": "string"
+                    },
+                    "partSizeBytes": {
+                      "type": "number"
+                    },
+                    "parts": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "partNumber": {
+                            "type": "number"
+                          },
+                          "uploadUrl": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "FILE_TOO_LARGE — fileSizeBytes exceeds the 10GB limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "UNSUPPORTED_MEDIA_TYPE — mimeType is not an accepted video format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Start a video upload",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{id}/complete-upload": {
+      "post": {
+        "description": "Finalizes the S3 multipart upload with the given part ETags and enqueues the video for background processing.",
+        "operationId": "VideosController_completeUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Video id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upload completed, video moved to processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string",
+                      "example": "processing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "VIDEO_NOT_FOUND — video does not exist or is not owned by the authenticated user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "UPLOAD_ALREADY_COMPLETED — video is no longer in draft status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "UPLOAD_COMPLETION_FAILED — object storage rejected the multipart completion",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Complete a video upload",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{id}/abort-upload": {
+      "post": {
+        "description": "Aborts the S3 multipart upload and removes the draft video record.",
+        "operationId": "VideosController_abortUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Video id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Upload aborted and draft removed"
+          },
+          "404": {
+            "description": "VIDEO_NOT_FOUND — video does not exist or is not owned by the authenticated user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "UPLOAD_ALREADY_COMPLETED — video is no longer in draft status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Abort a video upload",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{id}": {
+      "get": {
+        "description": "Returns the video's status and metadata. Anonymous-readable once the video is ready; otherwise visible only to its owner (Visibility rule).",
+        "operationId": "VideosController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Video id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Video details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "processing",
+                        "ready",
+                        "failed"
+                      ]
+                    },
+                    "durationSeconds": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "thumbnailUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "VIDEO_NOT_FOUND — video does not exist, or is not ready and the requester is not its owner (existence masked)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get video details",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{id}/stream": {
+      "get": {
+        "description": "Redirects to a time-limited presigned GET URL against object storage, supporting Range requests natively. Anonymous-readable once the video is ready; otherwise only its owner may request it (Visibility rule).",
+        "operationId": "VideosController_stream",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Video id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to a presigned GET URL supporting byte-range requests"
+          },
+          "404": {
+            "description": "VIDEO_NOT_FOUND — video does not exist, or is not ready and the requester is not its owner (existence masked)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VIDEO_NOT_READY — video exists, requester is its owner, but status is not ready yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Stream a video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{id}/download": {
+      "get": {
+        "description": "Redirects to a time-limited presigned GET URL with a Content-Disposition: attachment override, forcing a full download. Anonymous-readable once the video is ready; otherwise only its owner may request it (Visibility rule).",
+        "operationId": "VideosController_download",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Video id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to a presigned GET URL with Content-Disposition: attachment"
+          },
+          "404": {
+            "description": "VIDEO_NOT_FOUND — video does not exist, or is not ready and the requester is not its owner (existence masked)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VIDEO_NOT_READY — video exists, requester is its owner, but status is not ready yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Download a video",
+        "tags": [
+          "videos"
+        ]
+      }
     }
   },
   "info": {
@@ -478,6 +893,14 @@
         "properties": {}
       },
       "ResetPasswordDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateVideoDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CompleteUploadDto": {
         "type": "object",
         "properties": {}
       },

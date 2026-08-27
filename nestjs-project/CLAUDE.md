@@ -149,6 +149,52 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
 
+## Videos Module
+
+Video upload, background processing, and delivery span three locations — treat them as one feature, not three independent ones: a change to the upload/delivery contract almost always touches all three.
+
+- `src/videos/` — `VideosController` + `VideosService`: the 6 HTTP endpoints and all domain logic (draft creation, ownership, Visibility rule, job enqueueing).
+- `src/storage/` — `StorageService`: the only allowed entry point to S3/MinIO. Never instantiate `S3Client` or call the AWS SDK directly from `videos/` or `worker/` code — go through this service.
+- `src/worker/` + `src/worker.ts` — the dedicated background worker: a **separate NestJS application context** (`NestFactory.createApplicationContext`, not `NestFactory.create`), bootstrapped independently of the HTTP API and run as its own Compose service (`video-worker`, `command: node dist/worker.js`). Do not assume `VideosController`/`VideosService` and the worker share a running process — they communicate only through the DB and the queue.
+
+**Before changing any behavior in this module** (upload flow, queue/retry config, storage key scheme, or the streaming/download delivery mechanism), read `docs/decisions/technical-decisions-phase-03-videos.md`. It records the *why* — e.g. why client-driven S3 multipart upload was chosen over relaying bytes through the API, why BullMQ+Redis over the alternatives considered, why presigned-URL redirects over API-side range handling for streaming. Do not re-derive or override those decisions without checking that document first; if a change genuinely contradicts a recorded decision, flag it to the user rather than silently diverging.
+
+### Endpoints (`VideosController`, `src/videos/videos.controller.ts`)
+
+| Method | Route | Auth | Responsibility |
+|---|---|---|---|
+| POST | `/videos` | Authenticated | Validate `fileSizeBytes` (≤ 10GB) / `mimeType`, create the `draft` row owned by the caller's channel, start an S3 multipart upload, return per-part presigned PUT URLs |
+| POST | `/videos/:id/complete-upload` | Owner | Complete the multipart upload with the given part ETags, flip status to `processing`, enqueue `video.process` |
+| POST | `/videos/:id/abort-upload` | Owner | Abort the multipart upload, delete the draft row |
+| GET | `/videos/:id` | Optional (Visibility rule) | Return status/metadata; populate `thumbnailUrl` only when `status === 'ready'` |
+| GET | `/videos/:id/stream` | Optional (Visibility rule) | `302` to a presigned GET URL — no custom Range handling in the API, object storage answers byte-range requests natively |
+| GET | `/videos/:id/download` | Optional (Visibility rule) | `302` to a presigned GET URL with `Content-Disposition: attachment` |
+
+Keep all domain logic in `VideosService` — the controller must only call the service and map its result/exceptions to an HTTP response. If you add a 7th endpoint here, follow this same split.
+
+### Visibility rule — enforce identically on every read endpoint above
+
+- `status === 'ready'` → anonymous-readable, unconditionally.
+- `status` in `draft` / `processing` / `failed` → **owner only**. Every other requester (anonymous, or a different authenticated user) must get `404 VIDEO_NOT_FOUND` — never a partial or reduced payload. Existence is masked; do not leak that a non-ready video exists to anyone but its owner.
+- Exception: the owner requesting `/stream` or `/download` on a non-ready video gets `409 VIDEO_NOT_READY` instead of a mask — masking only applies to non-owners.
+- Put this branching in `VideosService.findVisibleById` (reused by `getStreamUrl`/`getDownloadUrl` through the private `findReadyVisibleOrThrow` helper) — never duplicate the status/ownership check in the controller or in a guard.
+- Use `@OptionalAuth()` (`src/auth/decorators/optional-auth.decorator.ts`) on these routes, not `@Public()`: it still decodes a bearer token when present (so ownership can be resolved) but does not reject the request when the header is missing or invalid — `request.user` becomes `null` instead of triggering a `401`. Read it with `@CurrentUserOrNull()` (`src/auth/decorators/current-user-or-null.decorator.ts`), never `@CurrentUser()`, on any `@OptionalAuth()` route.
+
+### Async processing — queue + dedicated worker
+
+- Never process video files inline in the HTTP request/response cycle. `VideosService.completeUpload` only enqueues a job; all FFmpeg work happens in the worker.
+- Queue: BullMQ, queue name `video-processing`, backed by the `redis` Compose service (`@nestjs/bullmq`). Job name `video.process`, payload `{ videoId, objectKey }`, `attempts: 3` with exponential backoff — do not enqueue without these retry options, they are load-bearing for the failure-handling rule below.
+- Consumer: `VideoProcessingProcessor` (`src/worker/video-processing.processor.ts`) — a `WorkerHost` subclass decorated `@Processor('video-processing')`. This is the `@nestjs/bullmq` (BullMQ-native) API; do not introduce the legacy `@nestjs/bull` `@Process()` decorator.
+- **Never write `status = 'failed'` on the first error.** `VideoProcessingProcessor.onFailed` (`@OnWorkerEvent('failed')`) only marks a video `failed` once `job.attemptsMade >= job.opts.attempts` — a transient failure must be left to retry silently first. Preserve this guard in any change to the failure path.
+- FFmpeg/ffprobe calls live only in `FfmpegService` (`src/worker/ffmpeg.service.ts`), which spawns the CLI binaries directly (no wrapper library) — `ffmpeg`/`ffprobe` must be present in the worker image's `PATH`. Keep the per-job temp-directory cleanup (`finally` block removing the `mkdtemp` dir) intact when touching this path.
+
+### Object storage (`src/storage/`)
+
+- All S3/MinIO access goes through `StorageService` (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`, `forcePathStyle: true` against the `minio` Compose service).
+- Two buckets, created idempotently on boot: `videos` (originals), `thumbnails`. Keys follow `{channelId}/{videoId}/original.<ext>` and `{channelId}/{videoId}/thumbnail.jpg` — derive new keys from this pattern; do not invent a different key scheme.
+- Upload bytes never pass through the API or worker process — presigned PUT URLs (client-driven S3 multipart upload) are the only upload path. Preserve this when extending the upload flow; do not add a code path that reads the file body server-side.
+- Reads (stream/download/thumbnail) use `getPresignedGetUrl(bucket, objectKey, { expiresIn?, responseContentDisposition? })` — pass `responseContentDisposition: 'attachment'` only for forced downloads, never for streaming/thumbnails.
+
 ## Code Conventions
 
 - **TypeScript:** `nodenext` module resolution, `ES2023` target, `strictNullChecks` on, `noImplicitAny` off

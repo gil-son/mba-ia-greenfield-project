@@ -3,6 +3,7 @@ import { User } from '../users/entities/user.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
+import { Video } from '../videos/entities/video.entity';
 import { CreateUsersAndChannels1775687773260 } from './migrations/1775687773260-CreateUsersAndChannels';
 import { CreateAuthTokens1777579850478 } from './migrations/1777579850478-CreateAuthTokens';
 import { createTestDataSource } from '../test/create-test-data-source';
@@ -19,7 +20,7 @@ describe('Database migrations (integration)', () => {
 
   beforeAll(async () => {
     dataSource = createTestDataSource(
-      [User, Channel, RefreshToken, VerificationToken],
+      [User, Channel, RefreshToken, VerificationToken, Video],
       {
         synchronize: false,
         migrations: [
@@ -31,12 +32,16 @@ describe('Database migrations (integration)', () => {
 
     await dataSource.initialize();
 
-    await Promise.all([
-      ...MANAGED_TABLES.map((table) =>
-        dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`),
-      ),
-      dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`),
-    ]);
+    // "videos" has an FK to "channels" — dropping "channels" CASCADE would silently
+    // strip that FK and leave orphaned rows behind. Drop "videos" explicitly too so
+    // later suites' synchronize() can recreate it cleanly.
+    const tablesToDrop = [...MANAGED_TABLES, 'migrations', 'videos']
+      .map((table) => `"${table}"`)
+      .join(', ');
+    await dataSource.query(`DROP TABLE IF EXISTS ${tablesToDrop} CASCADE`);
+    await dataSource.query(
+      `DROP TYPE IF EXISTS "public"."verification_tokens_type_enum" CASCADE`,
+    );
   });
 
   afterAll(async () => {
